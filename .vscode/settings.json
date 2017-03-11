@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "string": "cpp",
+        "queue": "cpp",
+        "iostream": "cpp",
+        "*h*h*h*h*hnew": "cpp",
+        "exception": "cpp",
+        "typeinfo": "cpp",
+        "*.tcc": "cpp",
+        "fstream": "cpp",
+        "sstream": "cpp",
+        "new": "cpp",
+        "functional": "cpp",
+        "*.js": "cpp"
+    }
+}
