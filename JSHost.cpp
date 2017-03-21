@@ -19,6 +19,7 @@ JSHost::JSHost()
 
 JSHost::~JSHost()
 {
+    taskQueue.clear();
     JsSetCurrentContext(JS_INVALID_REFERENCE);
     JsDisposeRuntime(runtime);
 }
@@ -33,9 +34,9 @@ bool JSHost::CreateEnviroment()
     JsCreateObject(&console);
 
     SetCallback(global, "setTimeout", JSHost::SetTimeout, nullptr);
-    //todo:: cleartimeout
-    //todo: setimediate
-
+    SetCallback(global, "setInterval", JSHost::SetInterval, nullptr);
+    SetCallback(global, "clearTimeout", JSHost::ClearTimeout, nullptr);
+    SetCallback(global, "clearInterval", JSHost::ClearTimeout, nullptr);
 
     SetProperty(global, "console", console);
     SetCallback(console, "log", JSHost::Log, nullptr);
@@ -100,23 +101,13 @@ bool JSHost::ExecuteScript(path p)
     return false;
 }
 
-JSHost *JSHost::GetHostForContext(JsValueRef object)
-{
-    void *h;
-    JsContextRef currentContext;
-
-    JsGetContextOfObject(object, &currentContext);
-    JsGetContextData(currentContext, &h);
-
-    return static_cast<JSHost *>(h);
-}
-
 bool JSHost::AddTaskToQueue(std::shared_ptr<Task> task)
 {
+    task->Reset();
     taskQueue.push_back(task);
     //possible improvment: we could be a little smarter here.
     //Figure out if std::priority_queue is more appropriate.
-    //or, simply make_heap only when we need to use it as a heap.
+    //or, simply make_heap only when we need to use it as a heap that is the time it needs to be a heap
     //by persisting the next wakeup time and then when we do wake, make_heap.
     //this would mean that anyone setting a timeout then quickly calling cleartimeout potentially can have 0(1)
     auto comp = [](std::shared_ptr<Task> l, std::shared_ptr<Task> r) { return l->GetDelay() < r->GetDelay(); };
@@ -139,7 +130,11 @@ void JSHost::RunTasks()
         }
         task->Run();
         taskQueue.pop_back();
-    }
+        if(task->DoesRepeat()) 
+        {
+            this->AddTaskToQueue(task);
+        }
+    } 
     hasWork = false;
 }
 
@@ -172,22 +167,80 @@ void JSHost::RemoveElapsedTime(int milliseconds)
     }
 }
 
+bool JSHost::ClearTask(int id) 
+{
+    auto task = std::find_if(taskQueue.begin(), taskQueue.end(), 
+    [id](std::shared_ptr<Task> const& t) 
+    { 
+        return t->timeoutID == id;
+    });
+    if(task == taskQueue.end()) {
+        return false;
+    }
+    //according to the spec we don't pull this from the queue, we simply mark it not to run'
+    (*task)->ClearTimeout();
+    return true;
+}
+
+JsValueRef JSHost::ClearTimeout(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
+{
+     if (isConstructCall || argumentCount < 2) {
+         std::cout << "clearTimeout needs at least a function to execute" << std::endl;
+         return JS_INVALID_REFERENCE;
+     }
+    int id = -1;
+    auto host = GetObjectFromContex<JSHost*>(callee);
+    if(JsNumberToInt(arguments[1], &id) == JsErrorInvalidArgument) {
+        id = -1;
+    }
+    host->ClearTask(id);
+    return JS_INVALID_REFERENCE;
+}
+
 JsValueRef JSHost::SetTimeout(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
-    //this is wrong per the spec.
-    //https://www.w3.org/TR/2011/WD-html5-20110525/timers.html#get-the-timeout 
-    if (isConstructCall || argumentCount != 3)
+    if (isConstructCall || argumentCount < 2)
     {
-        std::cout << "setTimeout has wrong argument count" << std::endl;
+        std::cout << "setTimeout needs at least a function to execute" << std::endl;
         return JS_INVALID_REFERENCE;
     }
+    
+    return CreateTimedTask(callee, arguments, argumentCount, false);
+}
+
+JsValueRef JSHost::SetInterval(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
+{
+    if (isConstructCall || argumentCount < 2)
+    {
+        std::cout << "setInterval needs at least a function to execute" << std::endl;
+        return JS_INVALID_REFERENCE;
+    }
+    
+    return CreateTimedTask(callee, arguments, argumentCount, true);
+}
+
+JsValueRef JSHost::CreateTimedTask(JsValueRef callee, JsValueRef *arguments, unsigned short argumentCount, bool repeat) {
+  // https://www.w3.org/TR/2011/WD-html5-20110525/timers.html#get-the-timeout 
     int delay = 0;
     JsValueRef func = arguments[1];
-    JSHost *host = GetHostForContext(callee);
+    //from chakrawrappers.h
+    auto host = GetObjectFromContex<JSHost*>(callee);
 
-    JsNumberToInt(arguments[2], &delay);
+    if(JsNumberToInt(arguments[2], &delay) == JsErrorInvalidArgument) {
+        delay = 0;
+    }
+    
     JsValueRef timeoutID;
-    std::shared_ptr<Task> t = std::make_shared<Task>(delay, func, arguments[0]);
+    std::vector<JsValueRef> extraArgs;
+    if(argumentCount > 3) 
+    {
+        for(int i = 3; i < argumentCount; i++) 
+        {   
+            extraArgs.push_back(arguments[i]);
+        }
+    }
+
+    std::shared_ptr<Task> t = std::make_shared<Task>(delay, repeat, func, arguments[0], extraArgs);
     JsIntToNumber(t->timeoutID, &timeoutID);
     host->AddTaskToQueue(t);
     return timeoutID;
@@ -195,7 +248,8 @@ JsValueRef JSHost::SetTimeout(JsValueRef callee, bool isConstructCall, JsValueRe
 
 JsValueRef JSHost::Quit(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
-    JSHost *host = GetHostForContext(callee);
+    //from chakrawrappers.h
+    auto host = GetObjectFromContex<JSHost*>(callee);
     host->hasQuit = true;
     return JS_INVALID_REFERENCE;
 }

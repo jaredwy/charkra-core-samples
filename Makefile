@@ -20,7 +20,7 @@ LDIR+=$(ICU4C_LIBRARY_PATH)/lib/libicudata.a \
 	$(ICU4C_LIBRARY_PATH)/lib/libicui18n.a
 
 testmake:
-	$(CC) sample.cpp JSHost.cpp $(CFLAGS) $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(LIBS)
+	$(CC) sample.cpp JSHost.cpp Task.cpp $(CFLAGS) $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(LIBS)
 
 .PHONY: clean
 

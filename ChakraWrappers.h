@@ -14,6 +14,19 @@ inline JsErrorCode JsGetPropertyIdFromName(const char* str, JsPropertyIdRef *Id)
 }
 #endif
 
+template<typename T>
+T GetObjectFromContex(JsValueRef object)
+{
+    void *t;
+    JsContextRef currentContext;
+
+    JsGetContextOfObject(object, &currentContext);
+    JsGetContextData(currentContext, &t);
+
+    return static_cast<T>(t);
+}
+
+
 JsErrorCode JsRunScriptContents(const std::string script, JsSourceContext sourceContext, std::string sourceUrl, JsValueRef* result) {
     JsValueRef sourceLocation;
     JsValueRef scriptSource;
